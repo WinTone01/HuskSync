@@ -37,19 +37,19 @@ import java.util.logging.Level;
 
 import static net.william278.husksync.config.Settings.DatabaseSettings;
 
-public class MySqlDatabase extends Database {
+public class PostgresDatabase extends Database {
 
     private static final String DATA_POOL_NAME = "HuskSyncHikariPool";
     private final String flavor;
     private final String driverClass;
     private HikariDataSource dataSource;
 
-    public MySqlDatabase(@NotNull HuskSync plugin) {
+    public PostgresDatabase(@NotNull HuskSync plugin) {
         super(plugin);
 
         final Type type = plugin.getSettings().getDatabase().getType();
         this.flavor = type.getProtocol();
-        this.driverClass = type == Type.MARIADB ? "org.mariadb.jdbc.Driver" : "com.mysql.cj.jdbc.Driver";
+        this.driverClass = "org.postgresql.Driver";
     }
 
     /**
@@ -123,11 +123,11 @@ public class MySqlDatabase extends Database {
                     statement.execute(tableCreationStatement);
                 }
             } catch (SQLException e) {
-                throw new IllegalStateException("Failed to create database tables. Please ensure you are running MySQL v8.0+ " +
+                throw new IllegalStateException("Failed to create database tables. Please ensure you are running PostgreSQL " +
                         "and that your connecting user account has privileges to create tables.", e);
             }
         } catch (SQLException | IOException e) {
-            throw new IllegalStateException("Failed to establish a connection to the MySQL database. " +
+            throw new IllegalStateException("Failed to establish a connection to the PostgreSQL database. " +
                     "Please check the supplied database credentials in the config file", e);
         }
     }
@@ -141,12 +141,12 @@ public class MySqlDatabase extends Database {
                         // Update a user's name if it has changed in the database
                         try (Connection connection = getConnection()) {
                             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                                    UPDATE `%users_table%`
-                                    SET `username`=?
-                                    WHERE `uuid`=?"""))) {
+                                    UPDATE "%users_table%"
+                                    SET "username"=?
+                                    WHERE "uuid"=?"""))) {
 
                                 statement.setString(1, user.getUsername());
-                                statement.setString(2, existingUser.getUuid().toString());
+                                statement.setObject(2, existingUser.getUuid());
                                 statement.executeUpdate();
                             }
                             plugin.log(Level.INFO, "Updated " + user.getUsername() + "'s name in the database (" + existingUser.getUsername() + " -> " + user.getUsername() + ")");
@@ -159,10 +159,10 @@ public class MySqlDatabase extends Database {
                     // Insert new player data into the database
                     try (Connection connection = getConnection()) {
                         try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                                INSERT INTO `%users_table%` (`uuid`,`username`)
+                                INSERT INTO "%users_table%" ("uuid","username")
                                 VALUES (?,?);"""))) {
 
-                            statement.setString(1, user.getUuid().toString());
+                            statement.setObject(1, user.getUuid());
                             statement.setString(2, user.getUsername());
                             statement.executeUpdate();
                         }
@@ -178,15 +178,15 @@ public class MySqlDatabase extends Database {
     public Optional<User> getUser(@NotNull UUID uuid) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    SELECT `uuid`, `username`
-                    FROM `%users_table%`
-                    WHERE `uuid`=?"""))) {
+                    SELECT "uuid", "username"
+                    FROM "%users_table%"
+                    WHERE "uuid"=?"""))) {
 
-                statement.setString(1, uuid.toString());
+                statement.setObject(1, uuid);
 
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
-                    return Optional.of(new User(UUID.fromString(resultSet.getString("uuid")),
+                    return Optional.of(new User((UUID) resultSet.getObject("uuid"),
                             resultSet.getString("username")));
                 }
             }
@@ -201,14 +201,14 @@ public class MySqlDatabase extends Database {
     public Optional<User> getUserByName(@NotNull String username) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    SELECT `uuid`, `username`
-                    FROM `%users_table%`
-                    WHERE `username`=?"""))) {
+                    SELECT "uuid", "username"
+                    FROM "%users_table%"
+                    WHERE "username"=?"""))) {
                 statement.setString(1, username);
 
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
-                    return Optional.of(new User(UUID.fromString(resultSet.getString("uuid")),
+                    return Optional.of(new User((UUID) resultSet.getObject("uuid"),
                             resultSet.getString("username")));
                 }
             }
@@ -223,21 +223,19 @@ public class MySqlDatabase extends Database {
     public Optional<DataSnapshot.Packed> getLatestSnapshot(@NotNull User user) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    SELECT `version_uuid`, `timestamp`, `data`
-                    FROM `%user_data_table%`
-                    WHERE `player_uuid`=?
-                    ORDER BY `timestamp` DESC
+                    SELECT "version_uuid", "timestamp", "data"
+                    FROM "%user_data_table%"
+                    WHERE "player_uuid"=?
+                    ORDER BY "timestamp" DESC
                     LIMIT 1;"""))) {
-                statement.setString(1, user.getUuid().toString());
+                statement.setObject(1, user.getUuid());
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
-                    final UUID versionUuid = UUID.fromString(resultSet.getString("version_uuid"));
+                    final UUID versionUuid = (UUID) resultSet.getObject("version_uuid");
                     final OffsetDateTime timestamp = OffsetDateTime.ofInstant(
                             resultSet.getTimestamp("timestamp").toInstant(), TimeZone.getDefault().toZoneId()
                     );
-                    final Blob blob = resultSet.getBlob("data");
-                    final byte[] dataByteArray = blob.getBytes(1, (int) blob.length());
-                    blob.free();
+                    final byte[] dataByteArray = resultSet.getBytes("data");
                     return Optional.of(DataSnapshot.deserialize(plugin, dataByteArray, versionUuid, timestamp));
                 }
             }
@@ -254,20 +252,18 @@ public class MySqlDatabase extends Database {
         final List<DataSnapshot.Packed> retrievedData = Lists.newArrayList();
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    SELECT `version_uuid`, `timestamp`,  `data`
-                    FROM `%user_data_table%`
-                    WHERE `player_uuid`=?
-                    ORDER BY `timestamp` DESC;"""))) {
-                statement.setString(1, user.getUuid().toString());
+                    SELECT "version_uuid", "timestamp",  "data"
+                    FROM "%user_data_table%"
+                    WHERE "player_uuid"=?
+                    ORDER BY "timestamp" DESC;"""))) {
+                statement.setObject(1, user.getUuid());
                 final ResultSet resultSet = statement.executeQuery();
                 while (resultSet.next()) {
-                    final UUID versionUuid = UUID.fromString(resultSet.getString("version_uuid"));
+                    final UUID versionUuid = (UUID) resultSet.getObject("version_uuid");
                     final OffsetDateTime timestamp = OffsetDateTime.ofInstant(
                             resultSet.getTimestamp("timestamp").toInstant(), TimeZone.getDefault().toZoneId()
                     );
-                    final Blob blob = resultSet.getBlob("data");
-                    final byte[] dataByteArray = blob.getBytes(1, (int) blob.length());
-                    blob.free();
+                    final byte[] dataByteArray = resultSet.getBytes("data");
                     retrievedData.add(DataSnapshot.deserialize(plugin, dataByteArray, versionUuid, timestamp));
                 }
                 return retrievedData;
@@ -283,21 +279,19 @@ public class MySqlDatabase extends Database {
     public Optional<DataSnapshot.Packed> getSnapshot(@NotNull User user, @NotNull UUID versionUuid) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    SELECT `version_uuid`, `timestamp`,  `data`
-                    FROM `%user_data_table%`
-                    WHERE `player_uuid`=? AND `version_uuid`=?
-                    ORDER BY `timestamp` DESC
+                    SELECT "version_uuid", "timestamp",  "data"
+                    FROM "%user_data_table%"
+                    WHERE "player_uuid"=? AND "version_uuid"=?
+                    ORDER BY "timestamp" DESC
                     LIMIT 1;"""))) {
-                statement.setString(1, user.getUuid().toString());
-                statement.setString(2, versionUuid.toString());
+                statement.setObject(1, user.getUuid());
+                statement.setObject(2, versionUuid);
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
-                    final Blob blob = resultSet.getBlob("data");
                     final OffsetDateTime timestamp = OffsetDateTime.ofInstant(
                             resultSet.getTimestamp("timestamp").toInstant(), TimeZone.getDefault().toZoneId()
                     );
-                    final byte[] dataByteArray = blob.getBytes(1, (int) blob.length());
-                    blob.free();
+                    final byte[] dataByteArray = resultSet.getBytes("data");
                     return Optional.of(DataSnapshot.deserialize(plugin, dataByteArray, versionUuid, timestamp));
                 }
             }
@@ -316,13 +310,13 @@ public class MySqlDatabase extends Database {
         if (unpinnedUserData.size() > maxSnapshots) {
             try (Connection connection = getConnection()) {
                 try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                        DELETE FROM `%user_data_table%`
-                        WHERE `player_uuid`=?
-                        AND `pinned` IS FALSE
-                        ORDER BY `timestamp` ASC
+                        DELETE FROM "%user_data_table%"
+                        WHERE "player_uuid"=?
+                        AND "pinned" = FALSE
+                        ORDER BY "timestamp" ASC
                         LIMIT %entry_count%;""".replace("%entry_count%",
                         Integer.toString(unpinnedUserData.size() - maxSnapshots))))) {
-                    statement.setString(1, user.getUuid().toString());
+                    statement.setObject(1, user.getUuid());
                     statement.executeUpdate();
                 }
             } catch (SQLException e) {
@@ -336,10 +330,10 @@ public class MySqlDatabase extends Database {
     public boolean deleteSnapshot(@NotNull User user, @NotNull UUID versionUuid) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    DELETE FROM `%user_data_table%`
-                    WHERE `player_uuid`=? AND `version_uuid`=?
+                    DELETE FROM "%user_data_table%"
+                    WHERE "player_uuid"=? AND "version_uuid"=?
                     LIMIT 1;"""))) {
-                statement.setString(1, user.getUuid().toString());
+                statement.setObject(1, user.getUuid());
                 statement.setString(2, versionUuid.toString());
                 return statement.executeUpdate() > 0;
             }
@@ -354,12 +348,17 @@ public class MySqlDatabase extends Database {
     protected void rotateLatestSnapshot(@NotNull User user, @NotNull OffsetDateTime within) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    DELETE FROM `%user_data_table%`
-                    WHERE `player_uuid`=? AND `timestamp`>? AND `pinned` IS FALSE
-                    ORDER BY `timestamp` ASC
-                    LIMIT 1;"""))) {
-                statement.setString(1, user.getUuid().toString());
-                statement.setTimestamp(2, Timestamp.from(within.toInstant()));
+                    DELETE FROM "%user_data_table%"
+                    WHERE "player_uuid"=? AND "timestamp" = (
+                       SELECT "timestamp"
+                       FROM "%user_data_table%"
+                       WHERE "player_uuid"=? AND "timestamp" > ? AND "pinned" = FALSE
+                       ORDER BY "timestamp" ASC
+                       LIMIT 1
+                    );"""))) {
+                statement.setObject(1, user.getUuid());
+                statement.setObject(2, user.getUuid());
+                statement.setTimestamp(3, Timestamp.from(within.toInstant()));
                 statement.executeUpdate();
             }
         } catch (SQLException e) {
@@ -372,15 +371,15 @@ public class MySqlDatabase extends Database {
     protected void createSnapshot(@NotNull User user, @NotNull DataSnapshot.Packed data) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    INSERT INTO `%user_data_table%`
-                    (`player_uuid`,`version_uuid`,`timestamp`,`save_cause`,`pinned`,`data`)
+                    INSERT INTO "%user_data_table%"
+                    ("player_uuid","version_uuid","timestamp","save_cause","pinned","data")
                     VALUES (?,?,?,?,?,?);"""))) {
-                statement.setString(1, user.getUuid().toString());
-                statement.setString(2, data.getId().toString());
+                statement.setObject(1, user.getUuid());
+                statement.setObject(2, data.getId());
                 statement.setTimestamp(3, Timestamp.from(data.getTimestamp().toInstant()));
                 statement.setString(4, data.getSaveCause().name());
                 statement.setBoolean(5, data.isPinned());
-                statement.setBlob(6, new ByteArrayInputStream(data.asBytes(plugin)));
+                statement.setBytes(6, data.asBytes(plugin));
                 statement.executeUpdate();
             }
         } catch (SQLException | DataAdapter.AdaptionException e) {
@@ -393,15 +392,15 @@ public class MySqlDatabase extends Database {
     public void updateSnapshot(@NotNull User user, @NotNull DataSnapshot.Packed data) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(formatStatementTables("""
-                    UPDATE `%user_data_table%`
-                    SET `save_cause`=?,`pinned`=?,`data`=?
-                    WHERE `player_uuid`=? AND `version_uuid`=?
+                    UPDATE "%user_data_table%"
+                    SET "save_cause"=?,"pinned"=?,"data"=?
+                    WHERE "player_uuid"=? AND "version_uuid"=?
                     LIMIT 1;"""))) {
                 statement.setString(1, data.getSaveCause().name());
                 statement.setBoolean(2, data.isPinned());
-                statement.setBlob(3, new ByteArrayInputStream(data.asBytes(plugin)));
-                statement.setString(4, user.getUuid().toString());
-                statement.setString(5, data.getId().toString());
+                statement.setBytes(3, data.asBytes(plugin));
+                statement.setObject(4, user.getUuid());
+                statement.setObject(5, data.getId());
                 statement.executeUpdate();
             }
         } catch (SQLException e) {
@@ -413,7 +412,7 @@ public class MySqlDatabase extends Database {
     public void wipeDatabase() {
         try (Connection connection = getConnection()) {
             try (Statement statement = connection.createStatement()) {
-                statement.executeUpdate(formatStatementTables("DELETE FROM `%user_data_table%`;"));
+                statement.executeUpdate(formatStatementTables("DELETE FROM \"%user_data_table%\";"));
             }
         } catch (SQLException e) {
             plugin.log(Level.SEVERE, "Failed to wipe the database", e);
