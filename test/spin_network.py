@@ -12,8 +12,8 @@ from tqdm import tqdm
 # Parameters for starting a network of Minecraft servers
 class Parameters:
     root_dir = './servers/'
-    proxy_version = "1.20"
-    minecraft_version = '1.20.4'
+    proxy_version = "1.21"
+    minecraft_version = '1.21.3'
     eula_agreement = 'true'
 
     backend_names = ['alpha', 'beta']
@@ -102,8 +102,8 @@ def create_backend_server(name, port, parameters):
         # Download the latest paper for the version and place it in the server folder
         server_jar = "paper.jar"
         download_paper_build("paper", parameters.minecraft_version,
-                             get_latest_paper_build_number("paper", parameters.minecraft_version),
-                             f"{server_dir}/{server_jar}")
+                            get_latest_paper_build_number("paper", parameters.minecraft_version),
+                            f"{server_dir}/{server_jar}")
 
         # Create eula.text and set eula=true
         with open(server_dir + "/eula.txt", "w") as file:
@@ -176,8 +176,8 @@ def create_proxy_server(parameters):
         # Download the latest paper for the version and place it in the server folder
         proxy_jar = "waterfall.jar"
         download_paper_build("waterfall", parameters.proxy_version,
-                             get_latest_paper_build_number("waterfall", parameters.proxy_version),
-                             f"{server_dir}/{proxy_jar}")
+                            get_latest_paper_build_number("waterfall", parameters.proxy_version),
+                            f"{server_dir}/{proxy_jar}")
 
         # Create the config.yml
         with open(server_dir + "/config.yml", "w") as file:

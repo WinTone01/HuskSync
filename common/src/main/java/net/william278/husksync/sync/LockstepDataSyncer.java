@@ -43,32 +43,29 @@ public class LockstepDataSyncer extends DataSyncer {
 
     // Consume their data when they are checked in
     @Override
-    public void setUserData(@NotNull OnlineUser user) {
+    public void syncApplyUserData(@NotNull OnlineUser user) {
         this.listenForRedisData(user, () -> {
-            if (getRedis().getUserCheckedOut(user).isEmpty()) {
-                getRedis().setUserCheckedOut(user, true);
-                getRedis().getUserData(user).ifPresentOrElse(
-                        data -> user.applySnapshot(data, DataSnapshot.UpdateCause.SYNCHRONIZED),
-                        () -> this.setUserFromDatabase(user)
-                );
-                return true;
+            if (getRedis().getUserCheckedOut(user).isPresent()) {
+                return false;
             }
-            return false;
+            getRedis().setUserCheckedOut(user, true);
+            getRedis().getUserData(user).ifPresentOrElse(
+                    data -> user.applySnapshot(data, DataSnapshot.UpdateCause.SYNCHRONIZED),
+                    () -> this.setUserFromDatabase(user)
+            );
+            return true;
         });
     }
 
     @Override
-    public void saveUserData(@NotNull OnlineUser onlineUser) {
-        plugin.runAsync(() -> {
-            getRedis().setUserServerSwitch(onlineUser);
-            saveData(
-                    onlineUser, onlineUser.createSnapshot(DataSnapshot.SaveCause.DISCONNECT),
-                    (user, data) -> {
-                        getRedis().setUserData(user, data, RedisKeyType.TTL_1_YEAR);
-                        getRedis().setUserCheckedOut(user, false);
-                    }
-            );
-        });
+    public void syncSaveUserData(@NotNull OnlineUser onlineUser) {
+        plugin.runAsync(() -> saveData(
+                onlineUser, onlineUser.createSnapshot(DataSnapshot.SaveCause.DISCONNECT),
+                (user, data) -> {
+                    getRedis().setUserData(user, data, RedisKeyType.TTL_1_YEAR);
+                    getRedis().setUserCheckedOut(user, false);
+                }
+        ));
     }
 
 }

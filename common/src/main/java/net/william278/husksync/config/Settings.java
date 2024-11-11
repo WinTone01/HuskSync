@@ -25,6 +25,7 @@ import de.exlll.configlib.Configuration;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import net.william278.husksync.command.PluginCommand;
 import net.william278.husksync.data.DataSnapshot;
 import net.william278.husksync.data.Identifier;
 import net.william278.husksync.database.Database;
@@ -63,18 +64,21 @@ public class Settings {
     private boolean checkForUpdates = true;
 
     @Comment("Specify a common ID for grouping servers running HuskSync. "
-            + "Don't modify this unless you know what you're doing!")
+             + "Don't modify this unless you know what you're doing!")
     private String clusterId = "";
 
     @Comment("Enable development debug logging")
     private boolean debugLogging = false;
 
-    @Comment("Whether to provide modern, rich TAB suggestions for commands (if available)")
-    private boolean brigadierTabCompletion = false;
-
     @Comment({"Whether to enable the Player Analytics hook.", "Docs: https://william278.net/docs/husksync/plan-hook"})
     private boolean enablePlanHook = true;
 
+    @Comment("Whether to cancel game event packets directly when handling locked players if ProtocolLib or PacketEvents is installed")
+    private boolean cancelPackets = true;
+
+    @Comment("Add HuskSync commands to this list to prevent them from being registered (e.g. ['userdata'])")
+    @Getter(AccessLevel.NONE)
+    private List<String> disabledCommands = Lists.newArrayList();
 
     // Database settings
     @Comment("Database settings")
@@ -100,7 +104,7 @@ public class Settings {
             private String database = "HuskSync";
             private String username = "root";
             private String password = "pa55w0rd";
-            @Comment("Only change this if you have select MYSQL, MARIADB or POSTGRES")
+            @Comment("Only change this if you're using MARIADB or POSTGRES")
             private String parameters = String.join("&",
                     "?autoReconnect=true", "useSSL=false",
                     "useUnicode=true", "characterEncoding=UTF-8");
@@ -137,13 +141,16 @@ public class Settings {
         @Getter(AccessLevel.NONE)
         private Map<String, String> tableNames = Database.TableName.getDefaults();
 
+        @Comment("Whether to run the creation SQL on the database when the server starts. Don't modify this unless you know what you're doing!")
+        private boolean createTables = true;
+
         @NotNull
         public String getTableName(@NotNull Database.TableName tableName) {
             return tableNames.getOrDefault(tableName.name().toLowerCase(Locale.ENGLISH), tableName.getDefaultName());
         }
     }
 
-    // Redis settings
+    // 𝓡𝓮𝓭𝓲𝓼 settings
     @Comment("Redis settings")
     private RedisSettings redis = new RedisSettings();
 
@@ -182,7 +189,7 @@ public class Settings {
     }
 
     // Synchronization settings
-    @Comment("Redis settings")
+    @Comment("Data syncing settings")
     private SynchronizationSettings synchronization = new SynchronizationSettings();
 
     @Getter
@@ -225,7 +232,7 @@ public class Settings {
             private boolean enabled = false;
 
             @Comment("What items to save in death snapshots? (DROPS or ITEMS_TO_KEEP). "
-                    + "Note that ITEMS_TO_KEEP (suggested for keepInventory servers) requires a Paper 1.19.4+ server.")
+                     + "Note that ITEMS_TO_KEEP (suggested for keepInventory servers) requires a Paper 1.19.4+ server.")
             private DeathItemsMode itemsToSave = DeathItemsMode.DROPS;
 
             @Comment("Should a death snapshot still be created even if the items to save on the player's death are empty?")
@@ -246,17 +253,14 @@ public class Settings {
         @Comment("Whether to use the snappy data compression algorithm. Keep on unless you know what you're doing")
         private boolean compressData = true;
 
-        @Comment("Where to display sync notifications (ACTION_BAR, CHAT, TOAST or NONE)")
+        @Comment("Where to display sync notifications (ACTION_BAR, CHAT or NONE)")
         private Locales.NotificationSlot notificationDisplaySlot = Locales.NotificationSlot.ACTION_BAR;
 
         @Comment("Persist maps locked in a Cartography Table to let them be viewed on any server")
         private boolean persistLockedMaps = true;
 
-        @Comment("Whether to synchronize player max health (requires health syncing to be enabled)")
-        private boolean synchronizeMaxHealth = true;
-
         @Comment("If using the DELAY sync method, how long should this server listen for Redis key data updates before "
-                + "pulling data from the database instead (i.e., if the user did not change servers).")
+                 + "pulling data from the database instead (i.e., if the user did not change servers).")
         private int networkLatencyMilliseconds = 500;
 
         @Comment({"Which data types to synchronize.", "Docs: https://william278.net/docs/husksync/sync-features"})
@@ -265,6 +269,53 @@ public class Settings {
 
         @Comment("Commands which should be blocked before a player has finished syncing (Use * to block all commands)")
         private List<String> blacklistedCommandsWhileLocked = new ArrayList<>(List.of("*"));
+
+        @Comment("Configuration for how to sync attributes")
+        private AttributeSettings attributes = new AttributeSettings();
+
+        @Getter
+        @Configuration
+        @NoArgsConstructor(access = AccessLevel.PRIVATE)
+        public static class AttributeSettings {
+
+            @Comment({"Which attribute types should be saved as part of attribute syncing. Supports wildcard matching.",
+                    "(e.g. ['minecraft:generic.max_health', 'minecraft:generic.*'])"})
+            @Getter(AccessLevel.NONE)
+            private List<String> syncedAttributes = new ArrayList<>(List.of(
+                    "minecraft:generic.max_health", "minecraft:max_health",
+                    "minecraft:generic.max_absorption", "minecraft:max_absorption",
+                    "minecraft:generic.luck", "minecraft:luck",
+                    "minecraft:generic.scale", "minecraft:scale",
+                    "minecraft:generic.step_height", "minecraft:step_height",
+                    "minecraft:generic.gravity", "minecraft:gravity"
+            ));
+
+            @Comment({"Which attribute modifiers should be saved. Supports wildcard matching.",
+                    "(e.g. ['minecraft:effect.speed', 'minecraft:effect.*'])"})
+            @Getter(AccessLevel.NONE)
+            private List<String> ignoredModifiers = new ArrayList<>(List.of(
+                    "minecraft:effect.*", "minecraft:creative_mode_*"
+            ));
+
+            private boolean matchesWildcard(@NotNull String pat, @NotNull String value) {
+                if (!pat.contains(":")) {
+                    pat = "minecraft:%s".formatted(pat);
+                }
+                if (!value.contains(":")) {
+                    value = "minecraft:%s".formatted(value);
+                }
+                return pat.contains("*") ? value.matches(pat.replace("*", ".*")) : pat.equals(value);
+            }
+
+            public boolean isIgnoredAttribute(@NotNull String attribute) {
+                return syncedAttributes.stream().noneMatch(wildcard -> matchesWildcard(wildcard, attribute));
+            }
+
+            public boolean isIgnoredModifier(@NotNull String modifier) {
+                return ignoredModifiers.stream().anyMatch(wildcard -> matchesWildcard(wildcard, modifier));
+            }
+
+        }
 
         @Comment("Event priorities for listeners (HIGHEST, NORMAL, LOWEST). Change if you encounter plugin conflicts")
         @Getter(AccessLevel.NONE)
@@ -287,5 +338,11 @@ public class Settings {
             }
         }
     }
+
+    public boolean isCommandDisabled(@NotNull PluginCommand command) {
+        return disabledCommands.stream().map(c -> c.startsWith("/") ? c.substring(1) : c)
+                .anyMatch(c -> c.equalsIgnoreCase(command.getName()) || command.getAliases().contains(c));
+    }
+
 
 }

@@ -57,7 +57,7 @@ public class Locales {
     Map<String, String> locales = Maps.newTreeMap();
 
     /**
-     * Returns a raw, un-formatted locale loaded from the locales file
+     * Returns a raw, unformatted locale loaded from the locale file
      *
      * @param localeId String identifier of the locale, corresponding to a key in the file
      * @return An {@link Optional} containing the locale corresponding to the id, if it exists
@@ -193,14 +193,20 @@ public class Locales {
          * Displays the notification in the action bar
          */
         ACTION_BAR,
+
         /**
          * Displays the notification in the chat
          */
         CHAT,
+
         /**
          * Displays the notification in an Advancement Toast
+         *
+         * @deprecated No longer supported
          */
+        @Deprecated(since = "3.6.7")
         TOAST,
+
         /**
          * Does not display the notification
          */

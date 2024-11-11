@@ -50,17 +50,13 @@ public class MongoDbDatabase extends Database {
 
     private final String usersTable;
     private final String userDataTable;
+
     public MongoDbDatabase(@NotNull HuskSync plugin) {
         super(plugin);
         this.usersTable = plugin.getSettings().getDatabase().getTableName(TableName.USERS);
         this.userDataTable = plugin.getSettings().getDatabase().getTableName(TableName.USER_DATA);
     }
 
-    /**
-     * Initialize the database and ensure tables are present; create tables if they do not exist.
-     *
-     * @throws IllegalStateException if the database could not be initialized
-     */
     @Override
     public void initialize() throws IllegalStateException {
         final Settings.DatabaseSettings.DatabaseCredentials credentials = plugin.getSettings().getDatabase().getCredentials();
@@ -68,6 +64,10 @@ public class MongoDbDatabase extends Database {
             ConnectionString URI = createConnectionURI(credentials);
             mongoConnectionHandler = new MongoConnectionHandler(URI, credentials.getDatabase());
             mongoCollectionHelper = new MongoCollectionHelper(mongoConnectionHandler);
+
+            // Check config for if tables should be created
+            if (!plugin.getSettings().getDatabase().isCreateTables()) return;
+
             if (mongoCollectionHelper.getCollection(usersTable) == null) {
                 mongoCollectionHelper.createCollection(usersTable);
             }
@@ -76,7 +76,7 @@ public class MongoDbDatabase extends Database {
             }
         } catch (Exception e) {
             throw new IllegalStateException("Failed to establish a connection to the MongoDB database. " +
-                    "Please check the supplied database credentials in the config file", e);
+                                            "Please check the supplied database credentials in the config file", e);
         }
     }
 
@@ -93,11 +93,6 @@ public class MongoDbDatabase extends Database {
         return new ConnectionString(baseURI);
     }
 
-    /**
-     * Ensure a {@link User} has an entry in the database and that their username is up-to-date
-     *
-     * @param user The {@link User} to ensure
-     */
     @Blocking
     @Override
     public void ensureUser(@NotNull User user) {
@@ -107,13 +102,13 @@ public class MongoDbDatabase extends Database {
                         if (!existingUser.getUsername().equals(user.getUsername())) {
                             // Update a user's name if it has changed in the database
                             try {
-                                Document filter = new Document("uuid", existingUser.getUuid().toString());
+                                Document filter = new Document("uuid", existingUser.getUuid());
                                 Document doc = mongoCollectionHelper.getCollection(usersTable).find(filter).first();
                                 if (doc == null) {
                                     throw new MongoException("User document returned null!");
                                 }
 
-                                Bson updates = Updates.set("uuid", user.getUuid().toString());
+                                Bson updates = Updates.set("username", user.getUsername());
                                 mongoCollectionHelper.updateDocument(usersTable, doc, updates);
                             } catch (MongoException e) {
                                 plugin.log(Level.SEVERE, "Failed to insert a user into the database", e);
@@ -123,7 +118,7 @@ public class MongoDbDatabase extends Database {
                     () -> {
                         // Insert new player data into the database
                         try {
-                            Document doc = new Document("uuid", user.getUuid().toString()).append("username", user.getUsername());
+                            Document doc = new Document("uuid", user.getUuid()).append("username", user.getUsername());
                             mongoCollectionHelper.insertDocument(usersTable, doc);
                         } catch (MongoException e) {
                             plugin.log(Level.SEVERE, "Failed to insert a user into the database", e);
@@ -135,12 +130,6 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Get a player by their Minecraft account {@link UUID}
-     *
-     * @param uuid Minecraft account {@link UUID} of the {@link User} to get
-     * @return An optional with the {@link User} present if they exist
-     */
     @Blocking
     @Override
     public Optional<User> getUser(@NotNull UUID uuid) {
@@ -148,8 +137,7 @@ public class MongoDbDatabase extends Database {
             Document filter = new Document("uuid", uuid);
             Document doc = mongoCollectionHelper.getCollection(usersTable).find(filter).first();
             if (doc != null) {
-                return Optional.of(new User(UUID.fromString(doc.getString("uuid")),
-                        doc.getString("username")));
+                return Optional.of(new User(uuid, doc.getString("username")));
             }
             return Optional.empty();
         } catch (MongoException e) {
@@ -158,12 +146,6 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Get a user by their username (<i>case-insensitive</i>)
-     *
-     * @param username Username of the {@link User} to get (<i>case-insensitive</i>)
-     * @return An optional with the {@link User} present if they exist
-     */
     @Blocking
     @Override
     public Optional<User> getUserByName(@NotNull String username) {
@@ -171,7 +153,7 @@ public class MongoDbDatabase extends Database {
             Document filter = new Document("username", username);
             Document doc = mongoCollectionHelper.getCollection(usersTable).find(filter).first();
             if (doc != null) {
-                return Optional.of(new User(UUID.fromString(doc.getString("uuid")),
+                return Optional.of(new User(doc.get("uuid", UUID.class),
                         doc.getString("username")));
             }
             return Optional.empty();
@@ -181,22 +163,34 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Get the latest data snapshot for a user.
-     *
-     * @param user The user to get data for
-     * @return an optional containing the {@link DataSnapshot}, if it exists, or an empty optional if it does not
-     */
+    @Override
+    @NotNull
+    public List<User> getAllUsers() {
+        final List<User> users = Lists.newArrayList();
+        try {
+            final FindIterable<Document> doc = mongoCollectionHelper.getCollection(usersTable).find();
+            for (Document document : doc) {
+                users.add(new User(
+                        UUID.fromString(document.getString("uuid")),
+                        document.getString("username")
+                ));
+            }
+        } catch (MongoException e) {
+            plugin.log(Level.SEVERE, "Failed to get all users from the database", e);
+        }
+        return users;
+    }
+
     @Blocking
     @Override
     public Optional<DataSnapshot.Packed> getLatestSnapshot(@NotNull User user) {
         try {
-            Document filter = new Document("player_uuid", user.getUuid().toString());
+            Document filter = new Document("player_uuid", user.getUuid());
             Document sort = new Document("timestamp", -1); // -1 = Descending
             FindIterable<Document> iterable = mongoCollectionHelper.getCollection(userDataTable).find(filter).sort(sort);
             Document doc = iterable.first();
             if (doc != null) {
-                final UUID versionUuid = UUID.fromString(doc.getString("version_uuid"));
+                final UUID versionUuid = doc.get("version_uuid", UUID.class);
                 final OffsetDateTime timestamp = OffsetDateTime.ofInstant(Instant.ofEpochMilli((long) doc.get("timestamp")), TimeZone.getDefault().toZoneId());
                 final Binary bin = doc.get("data", Binary.class);
                 final byte[] dataByteArray = bin.getData();
@@ -209,23 +203,17 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Get all {@link DataSnapshot} entries for a user from the database.
-     *
-     * @param user The user to get data for
-     * @return The list of a user's {@link DataSnapshot} entries
-     */
     @Blocking
     @Override
     @NotNull
     public List<DataSnapshot.Packed> getAllSnapshots(@NotNull User user) {
         try {
             final List<DataSnapshot.Packed> retrievedData = Lists.newArrayList();
-            Document filter = new Document("player_uuid", user.getUuid().toString());
+            Document filter = new Document("player_uuid", user.getUuid());
             Document sort = new Document("timestamp", -1); // -1 = Descending
             FindIterable<Document> iterable = mongoCollectionHelper.getCollection(userDataTable).find(filter).sort(sort);
             for (Document doc : iterable) {
-                final UUID versionUuid = UUID.fromString(doc.getString("version_uuid"));
+                final UUID versionUuid = doc.get("version_uuid", UUID.class);
                 final OffsetDateTime timestamp = OffsetDateTime.ofInstant(Instant.ofEpochMilli((long) doc.get("timestamp")), TimeZone.getDefault().toZoneId());
                 final Binary bin = doc.get("data", Binary.class);
                 final byte[] dataByteArray = bin.getData();
@@ -238,18 +226,11 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Gets a specific {@link DataSnapshot} entry for a user from the database, by its UUID.
-     *
-     * @param user        The user to get data for
-     * @param versionUuid The UUID of the {@link DataSnapshot} entry to get
-     * @return An optional containing the {@link DataSnapshot}, if it exists
-     */
     @Blocking
     @Override
     public Optional<DataSnapshot.Packed> getSnapshot(@NotNull User user, @NotNull UUID versionUuid) {
         try {
-            Document filter = new Document("player_uuid", user.getUuid().toString()).append("version_uuid", versionUuid.toString());
+            Document filter = new Document("player_uuid", user.getUuid()).append("version_uuid", versionUuid);
             Document sort = new Document("timestamp", -1); // -1 = Descending
             FindIterable<Document> iterable = mongoCollectionHelper.getCollection(userDataTable).find(filter).sort(sort);
             Document doc = iterable.first();
@@ -266,12 +247,6 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * <b>(Internal)</b> Prune user data for a given user to the maximum value as configured.
-     *
-     * @param user The user to prune data for
-     * @implNote Data snapshots marked as {@code pinned} are exempt from rotation
-     */
     @Blocking
     @Override
     protected void rotateSnapshots(@NotNull User user) {
@@ -281,7 +256,7 @@ public class MongoDbDatabase extends Database {
             final int maxSnapshots = plugin.getSettings().getSynchronization().getMaxUserDataSnapshots();
             if (unpinnedUserData.size() > maxSnapshots) {
 
-                Document filter = new Document("player_uuid", user.getUuid().toString()).append("pinned", false);
+                Document filter = new Document("player_uuid", user.getUuid()).append("pinned", false);
                 Document sort = new Document("timestamp", 1); // 1 = Ascending
                 FindIterable<Document> iterable = mongoCollectionHelper.getCollection(userDataTable)
                         .find(filter)
@@ -297,17 +272,11 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Deletes a specific {@link DataSnapshot} entry for a user from the database, by its UUID.
-     *
-     * @param user        The user to get data for
-     * @param versionUuid The UUID of the {@link DataSnapshot} entry to delete
-     */
     @Blocking
     @Override
     public boolean deleteSnapshot(@NotNull User user, @NotNull UUID versionUuid) {
         try {
-            Document filter = new Document("player_uuid", user.getUuid().toString()).append("version_uuid", versionUuid.toString());
+            Document filter = new Document("player_uuid", user.getUuid()).append("version_uuid", versionUuid);
             Document doc = mongoCollectionHelper.getCollection(userDataTable).find(filter).first();
             if (doc == null) {
                 return false;
@@ -320,19 +289,11 @@ public class MongoDbDatabase extends Database {
         return false;
     }
 
-    /**
-     * Deletes the most recent data snapshot by the given {@link User user}
-     * The snapshot must have been created after {@link OffsetDateTime time} and NOT be pinned
-     * Facilities the backup frequency feature, reducing redundant snapshots from being saved longer than needed
-     *
-     * @param user   The user to delete a snapshot for
-     * @param within The time to delete a snapshot after
-     */
     @Blocking
     @Override
     protected void rotateLatestSnapshot(@NotNull User user, @NotNull OffsetDateTime within) {
         try {
-            Document filter = new Document("player_uuid", user.getUuid().toString()).append("pinned", false);
+            Document filter = new Document("player_uuid", user.getUuid()).append("pinned", false);
             Document sort = new Document("timestamp", 1); // 1 = Ascending
             FindIterable<Document> iterable = mongoCollectionHelper.getCollection(userDataTable)
                     .find(filter)
@@ -352,18 +313,12 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * <b>Internal</b> - Create user data in the database
-     *
-     * @param user The user to add data for
-     * @param data The {@link DataSnapshot} to set.
-     */
     @Blocking
     @Override
     protected void createSnapshot(@NotNull User user, @NotNull DataSnapshot.Packed data) {
         try {
-            Document doc = new Document("player_uuid", user.getUuid().toString())
-                    .append("version_uuid", data.getId().toString())
+            Document doc = new Document("player_uuid", user.getUuid())
+                    .append("version_uuid", data.getId())
                     .append("timestamp", data.getTimestamp().toInstant().toEpochMilli())
                     .append("save_cause", data.getSaveCause().name())
                     .append("pinned", data.isPinned())
@@ -374,17 +329,11 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Update a saved {@link DataSnapshot} by given version UUID
-     *
-     * @param user     The user whose data snapshot
-     * @param data The {@link DataSnapshot} to update
-     */
     @Blocking
     @Override
     public void updateSnapshot(@NotNull User user, @NotNull DataSnapshot.Packed data) {
         try {
-            Document doc = new Document("player_uuid", user.getUuid().toString()).append("version_uuid", data.getId().toString());
+            Document doc = new Document("player_uuid", user.getUuid()).append("version_uuid", data.getId());
             Bson updates = Updates.combine(
                     Updates.set("save_cause", data.getSaveCause().name()),
                     Updates.set("pinned", data.isPinned()),
@@ -396,10 +345,6 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Wipes <b>all</b> {@link User} entries from the database.
-     * <b>This should only be used when preparing tables for a data migration.</b>
-     */
     @Blocking
     @Override
     public void wipeDatabase() {
@@ -410,9 +355,6 @@ public class MongoDbDatabase extends Database {
         }
     }
 
-    /**
-     * Close the database connection
-     */
     @Override
     public void terminate() {
         if (mongoConnectionHandler != null) {

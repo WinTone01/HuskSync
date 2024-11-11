@@ -204,10 +204,10 @@ public class LegacyMigrator extends Migrator {
             }) {
                 plugin.log(Level.INFO, getHelpMenu());
                 plugin.log(Level.INFO, "Successfully set " + args[0] + " to " +
-                        obfuscateDataString(args[1]));
+                                       obfuscateDataString(args[1]));
             } else {
                 plugin.log(Level.INFO, "Invalid operation, could not set " + args[0] + " to " +
-                        obfuscateDataString(args[1]) + " (is it a valid option?)");
+                                       obfuscateDataString(args[1]) + " (is it a valid option?)");
             }
         } else {
             plugin.log(Level.INFO, getHelpMenu());
@@ -323,18 +323,18 @@ public class LegacyMigrator extends Migrator {
 
                         // Stats
                         .statistics(BukkitData.Statistics.from(
-                                BukkitData.Statistics.createStatisticsMap(
-                                        convertStatisticMap(stats.untypedStatisticValues()),
-                                        convertMaterialStatisticMap(stats.blockStatisticValues()),
-                                        convertMaterialStatisticMap(stats.itemStatisticValues()),
-                                        convertEntityStatisticMap(stats.entityStatisticValues())
-                                )))
+                                convertStatisticMap(stats.untypedStatisticValues()),
+                                convertMaterialStatisticMap(stats.blockStatisticValues()),
+                                convertMaterialStatisticMap(stats.itemStatisticValues()),
+                                convertEntityStatisticMap(stats.entityStatisticValues())
+                        ))
 
                         // Health, hunger, experience & game mode
-                        .health(BukkitData.Health.from(health, maxHealth, healthScale))
+                        .health(BukkitData.Health.from(health, healthScale, false))
                         .hunger(BukkitData.Hunger.from(hunger, saturation, saturationExhaustion))
                         .experience(BukkitData.Experience.from(totalExp, expLevel, expProgress))
-                        .gameMode(BukkitData.GameMode.from(gameMode, isFlying, isFlying))
+                        .gameMode(BukkitData.GameMode.from(gameMode))
+                        .flightStatus(BukkitData.FlightStatus.from(isFlying, isFlying))
 
                         // Build & pack into new format
                         .saveCause(DataSnapshot.SaveCause.LEGACY_MIGRATION).buildAndPack();

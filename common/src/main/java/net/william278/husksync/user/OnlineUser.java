@@ -89,7 +89,9 @@ public abstract class OnlineUser extends User implements CommandUser, UserDataHo
      * @param description    the description of the toast
      * @param iconMaterial   the namespace-keyed material to use as an hasIcon of the toast
      * @param backgroundType the background ("ToastType") of the toast
+     * @deprecated No longer supported
      */
+    @Deprecated(since = "3.6.7")
     public abstract void sendToast(@NotNull MineDown title, @NotNull MineDown description,
                                    @NotNull String iconMaterial, @NotNull String backgroundType);
 
@@ -125,7 +127,7 @@ public abstract class OnlineUser extends User implements CommandUser, UserDataHo
         getPlugin().fireEvent(getPlugin().getPreSyncEvent(this, snapshot), (event) -> {
             if (!isOffline()) {
                 getPlugin().debug(String.format("Applying snapshot (%s) to %s (cause: %s)",
-                        snapshot.getShortId(), getUsername(), cause
+                        snapshot.getShortId(), getUsername(), cause.getDisplayName()
                 ));
                 UserDataHolder.super.applySnapshot(
                         event.getData(), (succeeded) -> completeSync(succeeded, cause, getPlugin())
@@ -145,12 +147,6 @@ public abstract class OnlineUser extends User implements CommandUser, UserDataHo
             switch (plugin.getSettings().getSynchronization().getNotificationDisplaySlot()) {
                 case CHAT -> cause.getCompletedLocale(plugin).ifPresent(this::sendMessage);
                 case ACTION_BAR -> cause.getCompletedLocale(plugin).ifPresent(this::sendActionBar);
-                case TOAST -> cause.getCompletedLocale(plugin)
-                        .ifPresent(locale -> this.sendToast(
-                                locale, new MineDown(""),
-                                "minecraft:bell",
-                                "TASK"
-                        ));
             }
             plugin.fireEvent(
                     plugin.getSyncCompleteEvent(this),

@@ -174,6 +174,7 @@ public class HuskSyncAPI {
     public void editCurrentData(@NotNull User user, @NotNull ThrowingConsumer<DataSnapshot.Unpacked> editor) {
         getCurrentData(user).thenAccept(optional -> optional.ifPresent(data -> {
             editor.accept(data);
+            data.setId(UUID.randomUUID());
             setCurrentData(user, data);
         }));
     }
@@ -264,9 +265,9 @@ public class HuskSyncAPI {
      *
      * @param user     The user to save the data for
      * @param snapshot The snapshot to save
-     * @param callback A callback to run after the data has been saved (if the DataSaveEvent was not cancelled)
-     * @apiNote This will fire the {@link net.william278.husksync.event.DataSaveEvent} event, unless
-     * the save cause is {@link DataSnapshot.SaveCause#SERVER_SHUTDOWN}
+     * @param callback A callback to run after the data has been saved (if the DataSaveEvent was not canceled)
+     * @implNote Note that the {@link net.william278.husksync.event.DataSaveEvent} will be fired unless the
+     * {@link DataSnapshot.SaveCause#fireDataSaveEvent()} is {@code false}
      * @since 3.3.2
      */
     public void addSnapshot(@NotNull User user, @NotNull DataSnapshot snapshot,
@@ -284,8 +285,8 @@ public class HuskSyncAPI {
      *
      * @param user     The user to save the data for
      * @param snapshot The snapshot to save
-     * @apiNote This will fire the {@link net.william278.husksync.event.DataSaveEvent} event, unless
-     * * the save cause is {@link DataSnapshot.SaveCause#SERVER_SHUTDOWN}
+     * @implNote Note that the {@link net.william278.husksync.event.DataSaveEvent} will be fired unless the
+     * {@link DataSnapshot.SaveCause#fireDataSaveEvent()} is {@code false}
      * @since 3.0
      */
     public void addSnapshot(@NotNull User user, @NotNull DataSnapshot snapshot) {
@@ -375,6 +376,17 @@ public class HuskSyncAPI {
     public <T extends Data> void registerDataSerializer(@NotNull Identifier identifier,
                                                         @NotNull Serializer<T> serializer) {
         plugin.registerSerializer(identifier, serializer);
+    }
+
+    /**
+     * Get a registered data serializer by its identifier
+     *
+     * @param identifier The identifier of the data type to get the serializer for
+     * @return The serializer for the given identifier, or an empty optional if the serializer isn't registered
+     * @since 3.5.4
+     */
+    public Optional<Serializer<Data>> getDataSerializer(@NotNull Identifier identifier) {
+        return plugin.getSerializer(identifier);
     }
 
     /**
@@ -499,17 +511,19 @@ public class HuskSyncAPI {
      */
     static final class NotRegisteredException extends IllegalStateException {
 
-        private static final String MESSAGE = """
-                Could not access the HuskSync API as it has not yet been registered. This could be because:
+        private static final String REASONS = """
+                This may be because:
                 1) HuskSync has failed to enable successfully
                 2) Your plugin isn't set to load after HuskSync has
                    (Check if it set as a (soft)depend in plugin.yml or to load: BEFORE in paper-plugin.yml?)
-                3) You are attempting to access HuskSync on plugin construction/before your plugin has enabled.
-                4) You have shaded HuskSync into your plugin jar and need to fix your maven/gradle/build script
-                   to only include HuskSync as a dependency and not as a shaded dependency.""";
+                3) You are attempting to access HuskSync on plugin construction/before your plugin has enabled.""";
+
+        NotRegisteredException(@NotNull String reasons) {
+            super("Could not access the HuskSync API as it has not yet been registered. %s".formatted(reasons));
+        }
 
         NotRegisteredException() {
-            super(MESSAGE);
+            this(REASONS);
         }
 
     }

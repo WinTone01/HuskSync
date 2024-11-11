@@ -20,14 +20,17 @@
 package net.william278.husksync;
 
 import net.kyori.adventure.audience.Audience;
+import net.william278.desertwell.util.Version;
 import net.william278.husksync.listener.BukkitEventListener;
 import net.william278.husksync.listener.PaperEventListener;
+import net.william278.uniform.Uniform;
+import net.william278.uniform.paper.PaperUniform;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
-@SuppressWarnings("unused")
+@SuppressWarnings({"unchecked", "unused"})
 public class PaperHuskSync extends BukkitHuskSync {
 
     @NotNull
@@ -43,4 +46,15 @@ public class PaperHuskSync extends BukkitHuskSync {
         return player == null || !player.isOnline() ? Audience.empty() : player;
     }
 
+    @NotNull
+    @Override
+    public Version getMinecraftVersion() {
+        return Version.fromString(getServer().getMinecraftVersion());
+    }
+
+    @Override
+    @NotNull
+    public Uniform getUniform() {
+        return PaperUniform.getInstance(this);
+    }
 }
